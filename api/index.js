@@ -20,6 +20,7 @@ app.use(
   })
 );
 app.use(cookieParser());
+app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 5000;
 
@@ -54,25 +55,12 @@ cloudinary.config({
 
 const storage = multer.diskStorage({});
 
-// const fileFilter = (req, file, cb) => {
-//   if (file.mimetype === "application/pdf") {
-//     cb(null, true);
-//   } else {
-//     cb(new Error("Only PDF files are allowed"), false);
-//   }
-// };
-
 const upload = multer({
   storage,
-  //fileFilter,
-  // limits: {
-  //   fileSize: 2 * 1024 * 1024,
-  // },
 });
 
 //login with github auth
 app.get("/v1/auth/github", (req, res) => {
-  console.log(process.env.BACKEND_URL);
   const githubUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&redirect_uri=${process.env.BACKEND_URL}/v1/auth/github/callback&scope=read:user`;
   res.redirect(githubUrl);
 });
@@ -138,6 +126,23 @@ app.post("/v1/logout", (req, res) => {
   return res.status(200).json({ message: "Logged out successfully" });
 });
 
+//my profile
+app.get("/v1/profiles/my-profile", verifyJwt, async (req, res) => {
+  try {
+    const githubUsername = req.user.login;
+    const profileDetails = await User.findOne({ githubUsername });
+    if (!profileDetails) {
+      return res.status(404).json({
+        error: "NotFound",
+        message: "Profile not found",
+      });
+    }
+    res.status(200).json({ profile: profileDetails });
+  } catch (error) {
+    res.status(500).json("Internal server error");
+  }
+});
+
 //profile
 app.post("/v1/profiles", verifyJwt, async (req, res) => {
   try {
@@ -187,9 +192,6 @@ app.post("/v1/profiles", verifyJwt, async (req, res) => {
         repoUrl: repo.html_url,
         description: repo.description || "No description",
       })); // get only 5 Repo
-
-    console.log(userData);
-    console.log(linkedinUrl);
 
     const existingUser = await User.findOne({ githubUsername });
     if (existingUser) {
@@ -312,9 +314,9 @@ app.post("/v1/profiles/:user_id", verifyJwt, async (req, res) => {
       updateData.bio = bio;
     }
 
+    const urlPattern =
+      /^(https?:\/\/)?([\w\-]+\.)+[\w\-]+(\/[\w\-._~:/?#[\]@!$&'()*+,;=]*)?$/;
     if (linkedinUrl) {
-      const urlPattern =
-        /^(https?:\/\/)?([\w\-]+\.)+[\w\-]+(\/[\w\-._~:/?#[\]@!$&'()*+,;=]*)?$/;
       if (!urlPattern.test(linkedinUrl)) {
         return res.status(400).json({
           error: "BadRequest",
@@ -325,15 +327,13 @@ app.post("/v1/profiles/:user_id", verifyJwt, async (req, res) => {
     }
 
     if (portfolioUrl) {
-      const urlPattern =
-        /^(https?:\/\/)?([\w\-]+\.)+[\w\-]+(\/[\w\-._~:/?#[\]@!$&'()*+,;=]*)?$/;
       if (!urlPattern.test(portfolioUrl)) {
         return res.status(400).json({
           error: "BadRequest",
           message: "Invalid input data: portfolio URL is not valid.",
         });
       }
-      updateData.portfolioUrl = linkedinUrl;
+      updateData.portfolioUrl = portfolioUrl;
     }
 
     if (resumeUrl) {
@@ -367,7 +367,7 @@ app.post("/v1/profiles/:user_id", verifyJwt, async (req, res) => {
 
     const updatedProfile = await User.findByIdAndUpdate(
       req.params.user_id,
-      userData,
+      updateData,
       { new: true }
     );
 
@@ -436,6 +436,7 @@ app.post(
         resumeUrl: result.secure_url,
       });
     } catch (error) {
+      console.log("error:", error);
       res.status(500).json("Internal server error");
     }
   }
@@ -500,7 +501,7 @@ app.post("/v1/profiles/:user_id/slug", verifyJwt, async (req, res) => {
 
     res.status(200).json({
       message: "Custom slug updated successfully",
-      profile: user,
+      customSlug: user.customSlug,
     });
   } catch (error) {
     res.status(500).json("Internal server error");
@@ -571,6 +572,7 @@ app.post("/v1/profiles/:user_id/featured", verifyJwt, async (req, res) => {
 
     res.status(200).json({
       message: "Added the repo in featured",
+      featuredRepos: user.featuredRepos,
     });
   } catch (error) {
     res.status(500).json("Internal server error");
@@ -599,18 +601,23 @@ app.get("/v1/profiles/:user_id/featured", verifyJwt, async (req, res) => {
 app.get("/v1/profiles/search", async (req, res) => {
   try {
     const { tags } = req.query;
+    console.log(tags); //""
 
-    if (!tags) {
-      return res.status(400).json({
-        error: "BadRequest",
-        message: "Tags query parameter is required",
+    let users;
+
+    if (!tags || tags.trim() === "") {
+      users = await User.find();
+    } else {
+      const tagArray = tags
+        .split(",")
+        .map((tag) => tag.trim().toLowerCase())
+        .filter((tag) => tag);
+
+      users = await User.find({
+        tags: { $in: tagArray },
       });
+      console.log(users);
     }
-
-    const tagArray = tags.split(",").map((tag) => tag.trim().toLowerCase());
-    const users = await User.find({
-      tags: { $in: tagArray },
-    });
 
     res.status(200).json(users);
   } catch (error) {
