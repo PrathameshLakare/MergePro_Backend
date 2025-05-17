@@ -15,7 +15,7 @@ const User = require("./model/user.model");
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: process.env.BACKEND_URL,
     credentials: true,
   })
 );
