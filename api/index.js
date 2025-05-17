@@ -178,7 +178,10 @@ app.post("/v1/profiles", verifyJwt, async (req, res) => {
     const githubReposResponse = await axios.get(
       `https://api.github.com/users/${githubUsername}/repos`,
       {
-        headers: { Accept: "application/vnd.github.v3+json" },
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          Accept: "application/vnd.github.v3+json",
+        },
       }
     );
 
